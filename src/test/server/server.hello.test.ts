@@ -11,6 +11,7 @@ import {
 } from '@grpc/grpc-js'
 import { Hello } from '../../../dist/test/api/v1/hello_pb'
 import { performance } from 'perf_hooks'
+import { createClient } from '../../lib/client'
 
 const ADDR = '0.0.0.0:3000'
 describe('HelloService (boring, predictable and exhaustive)', () => {
@@ -114,6 +115,24 @@ describe('HelloService (boring, predictable and exhaustive)', () => {
       expect((await status).metadata.getMap().type).toEqual('trailingUnary')
     })
   })
+  describe('Unary: Custom client', () => {
+    const client = createClient(GreetingClient, ADDR)
+    test('Reqest & response', async () => {
+      const { response, metadata, status } = await client.unary(ctx => {
+        ctx.request.setName('X')
+        ctx.metadata.set('client', 'unaryClientMeta')
+      })
+      expect(response.getName()).toBe('X')
+      // Initial metadata
+      expect(metadata.getMap().type).toEqual('initialUnary')
+      // Middleware ran
+      responseTimeSet(metadata)
+      // Client metadata
+      expect(metadata.getMap().client).toEqual('unaryClientMeta')
+      // Trailing metadata
+      expect(status.metadata.getMap().type).toEqual('trailingUnary')
+    })
+  })
   describe('ServerStream', () => {
     const client = new GreetingClient(ADDR, ChannelCredentials.createInsecure())
     let metadata: Promise<Metadata> = null as any
@@ -144,6 +163,30 @@ describe('HelloService (boring, predictable and exhaustive)', () => {
       expect((await metadata).getMap().client).toEqual('serverStreamClientMeta')
     })
     test('Trailing metadata', async () => {
+      expect((await status).metadata.getMap().type).toEqual(
+        'trailingServerStream'
+      )
+    })
+  })
+  describe('ServerStream: Custom client', () => {
+    const client = createClient(GreetingClient, ADDR)
+    test('Response stream', async () => {
+      let acc = ''
+      const { call, metadata, status } = await client.serverStream(ctx =>
+        ctx.metadata.set('client', 'serverStreamClientMeta')
+      )
+      call.on('data', hello => {
+        acc = `${acc}${hello.getName()}`
+      })
+      await new Promise(resolve => call.on('end', resolve))
+      expect(acc).toMatchInlineSnapshot('"WorldWorldWorldWorldWorld"')
+      // Initial metadata
+      expect((await metadata).getMap().type).toEqual('initialServerStream')
+      // Middleware ran
+      responseTimeSet(await metadata)
+      // Client metadata
+      expect((await metadata).getMap().client).toEqual('serverStreamClientMeta')
+      // Trailing metadata
       expect((await status).metadata.getMap().type).toEqual(
         'trailingServerStream'
       )
