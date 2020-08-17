@@ -1,6 +1,6 @@
 import * as grpc from '@grpc/grpc-js'
 import { stubToType, CallType } from './call-types'
-import { TypedOnData } from './type-helpers'
+import { TypedOnData } from './misc/type-helpers'
 
 type InterceptorContext<Req> = {
   request: Req
@@ -8,7 +8,29 @@ type InterceptorContext<Req> = {
   options: Partial<grpc.CallOptions>
 }
 type Interceptor<Req> = (ctx: InterceptorContext<Req>) => any
-
+type ServerStreamCall<Req, Res> = (
+  interceptor?: Interceptor<Req>
+) => Promise<{
+  call: TypedOnData<grpc.ClientReadableStream<Res>, Res>
+  metadata: Promise<grpc.Metadata>
+  status: Promise<grpc.StatusObject>
+}>
+type ClientStreamCall<Req, Res> = (
+  interceptor?: Interceptor<Req>
+) => Promise<{
+  response: Promise<Res>
+  call: grpc.ClientWritableStream<Req>
+  metadata: Promise<grpc.Metadata>
+  status: Promise<grpc.StatusObject>
+}>
+type UnaryCall<Req, Res> = (
+  interceptor?: Interceptor<Req>
+) => Promise<{
+  response: Res
+  call: grpc.ClientUnaryCall
+  metadata: grpc.Metadata
+  status: grpc.StatusObject
+}>
 export const createClient = <S extends grpc.Client>(
   Client: new (...args: any[]) => S,
   address: string
@@ -21,12 +43,12 @@ export const createClient = <S extends grpc.Client>(
   for (const rpcName in grpcClient) {
     const rpc: any = grpcClient[rpcName]
     const type = stubToType(rpc)
-    // @ts-ignore
     const RequestType = rpc.requestType
-    if (type === CallType.UNARY) {
+    if (type === CallType.Unary) {
       resClient[rpcName] = async (interceptor: any) => {
         let metadata
         let status
+        let call: any
         const ctx = {
           request: new RequestType(),
           metadata: new grpc.Metadata(),
@@ -34,7 +56,7 @@ export const createClient = <S extends grpc.Client>(
         }
         await interceptor(ctx)
         const response = await new Promise((resolve, reject) => {
-          const call = rpc.bind(grpcClient)(
+          call = rpc.bind(grpcClient)(
             ctx.request,
             ctx.metadata,
             ctx.options,
@@ -43,10 +65,9 @@ export const createClient = <S extends grpc.Client>(
           metadata = new Promise(resolve => call.on('metadata', resolve))
           status = new Promise(resolve => call.on('status', resolve))
         })
-        return { response, metadata: await metadata, status: await status }
+        return { call, response, metadata: await metadata, status: await status }
       }
-    }
-    if (type === CallType.SERVER_STREAM) {
+    } else if (type === CallType.ServerStream) {
       resClient[rpcName] = async (interceptor: any) => {
         const ctx = {
           request: new RequestType(),
@@ -63,6 +84,33 @@ export const createClient = <S extends grpc.Client>(
         const status = new Promise(resolve => call.on('status', resolve))
         return { call, metadata, status }
       }
+    } else if (type === CallType.ClientStream) {
+      let metadata
+      let status
+      let call
+      resClient[rpcName] = async (interceptor: any) => {
+        const ctx = {
+          metadata: new grpc.Metadata(),
+          options: {},
+        }
+        await interceptor(ctx)
+        // const call = rpc.bind(grpcClient)(
+        //   ctx.metadata,
+        //   ctx.options
+        // )
+        // const metadata = new Promise(resolve => call.on('metadata', resolve))
+        // const status = new Promise(resolve => call.on('status', resolve))
+        const response = await new Promise((resolve, reject) => {
+          call = rpc.bind(grpcClient)(
+            ctx.metadata,
+            ctx.options,
+            (err: Error, res: any) => (err ? reject(err) : resolve(res))
+          )
+          metadata = new Promise(resolve => call.on('metadata', resolve))
+          status = new Promise(resolve => call.on('status', resolve))
+        })
+        return { call, response, metadata, status }
+      }
     }
   }
   return resClient as {
@@ -71,13 +119,7 @@ export const createClient = <S extends grpc.Client>(
       metadata?: grpc.Metadata,
       options?: Partial<grpc.CallOptions>
     ) => grpc.ClientReadableStream<infer Res>
-      ? (
-          interceptor?: Interceptor<Req>
-        ) => Promise<{
-          call: TypedOnData<grpc.ClientReadableStream<Res>, Res>
-          metadata: Promise<grpc.Metadata>
-          status: Promise<grpc.StatusObject>
-        }>
+      ? ServerStreamCall<Req, Res>
       : S[K] extends (
           request: infer Req,
           metadata: grpc.Metadata,
@@ -87,13 +129,16 @@ export const createClient = <S extends grpc.Client>(
             response: infer Res
           ) => void
         ) => grpc.ClientUnaryCall
-      ? (
-          interceptor?: Interceptor<Req>
-        ) => Promise<{
-          response: Res
-          metadata: grpc.Metadata
-          status: grpc.StatusObject
-        }>
+      ? UnaryCall<Req, Res>
+      : S[K] extends (
+          metadata: grpc.Metadata,
+          options: Partial<grpc.CallOptions>,
+          callback: (
+            error: grpc.ServiceError | null,
+            response: infer Res
+          ) => void
+        ) => grpc.ClientWritableStream<infer Req>
+      ? ClientStreamCall<Req, Res>
       : never
   }
 }

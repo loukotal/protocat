@@ -117,7 +117,7 @@ describe('HelloService (boring, predictable and exhaustive)', () => {
   })
   describe('Unary: Custom client', () => {
     const client = createClient(GreetingClient, ADDR)
-    test('Reqest & response', async () => {
+    test('Reqest & response (initial, trailing, client metadata, middleware run)', async () => {
       const { response, metadata, status } = await client.unary(ctx => {
         ctx.request.setName('X')
         ctx.metadata.set('client', 'unaryClientMeta')
@@ -170,7 +170,7 @@ describe('HelloService (boring, predictable and exhaustive)', () => {
   })
   describe('ServerStream: Custom client', () => {
     const client = createClient(GreetingClient, ADDR)
-    test('Response stream', async () => {
+    test('Response stream (initial, trailing, client metadata, middleware run)', async () => {
       let acc = ''
       const { call, metadata, status } = await client.serverStream(ctx =>
         ctx.metadata.set('client', 'serverStreamClientMeta')
