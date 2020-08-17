@@ -50,8 +50,8 @@ describe('Error handling', () => {
         if (call.metadata.getMap().catch) {
           lastError = e
           if (
-            call.type === CallType.SERVER_STREAM ||
-            call.type === CallType.BIDI
+            call.type === CallType.ServerStream ||
+            call.type === CallType.Bidi
           ) {
             // sync error not re-thrown on stream response, should end
             call.end()
